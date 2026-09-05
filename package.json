@@ -1,0 +1,20 @@
+{
+  "name": "nonprofit-semantic-search",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "node --experimental-strip-types scripts/seed_corpus.ts",
+    "dev": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test test/scope_filter.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
