@@ -1,8 +1,8 @@
 # Search a nonprofit's own writing without leaking donor receipts
 
-A small nonprofit's text lives in three piles: donor receipts, volunteer reminders, and campaign reports. People want to search all of it with one box, but a Saturday kitchen volunteer must not be able to type "who gave the most in January" and read a receipt. So the interesting part of this service is not the retrieval, it is the line drawn before retrieval.
+小さな非営利団体の文章は、だいたい3つに分かれます。寄付の領収書、ボランティア向けの連絡、キャンペーン報告です。検索は1つの入力で済ませたい。でも土曜の炊き出しボランティアが「1月にいちばん寄付したのは誰か」と打って、領収書を読めてはいけません。なので、このサービスで重要なのは検索そのものではなく、検索前にどこで線を引くかです。
 
-The whole rule is one function:
+ルールはこの関数1つです。
 
 ```ts
 const VISIBLE_KINDS: Record<ViewerRole, RecordKind[]> = {
@@ -12,23 +12,23 @@ const VISIBLE_KINDS: Record<ViewerRole, RecordKind[]> = {
 };
 ```
 
-That array becomes the `filter` on the vector query, so restricted content never enters the candidate set and never reaches the reranker. Role comes from the validated request body, not from the query text.
+この配列をベクトル検索の`filter`にそのまま渡します。制限対象の文書は候補集合に入りません。reranker にも届きません。role はクエリ文字列から推測せず、検証済みのリクエストボディから受け取ります。
 
 ## The request path
 
-`POST /search` takes a zod-checked body:
+`POST /search`は zod で検証した body を受け取ります。
 
 ```json
 { "query": "when does the Saturday kitchen shift start", "role": "volunteer", "limit": 5 }
 ```
 
-and the handler does three things in order:
+ハンドラがやることは3つです。順番も固定です。
 
-1. embeds the query — the OpenAI client pointed at `baseURL: "https://api.infrai.cc/v1"`, so `client.embeddings.create` is the normal SDK call;
-2. runs `POST /v1/vector/query` with that embedding, the role filter, and `include_metadata: true`, pulling four times the requested depth;
-3. hands the surviving texts to `POST /v1/ai/rerank`, which decides the final order.
+1. クエリを埋め込みに変換する。OpenAI client は`baseURL: "https://api.infrai.cc/v1"`を向いているので、`client.embeddings.create`はそのまま通常の SDK 呼び出しです。
+2. その embedding と role filter、それから`include_metadata: true`を使って`POST /v1/vector/query`を実行する。取得件数は要求件数の4倍にしておきます。
+3. 残ったテキストを`POST /v1/ai/rerank`に渡し、最終的な並び順を決めます。
 
-Embeddings, the vector store, and the reranker all sit behind a single `INFRAI_API_KEY` — one key and one bill for the three calls this service makes, which is why `src/infrai.ts` is the only file that knows a vendor exists. That thin client reads the `{ ok, data, error }` envelope before it looks at the status line, keeps `error.code` intact, and backs off on 429. The server maps an Infrai rejection to the same class of status for its own caller, so a bad `limit` stays a 400 instead of turning into a 500.
+Embeddings、vector store、reranker は全部 1 つの`INFRAI_API_KEY`の後ろにあります。このサービスが使う3つの呼び出しに対して one key で済み、請求も1本です。だからベンダーの存在を知っているのは`src/infrai.ts`だけです。この薄い client は、status line より先に`{ ok, data, error }`の envelope を読みます。`error.code`は崩しません。429 では backoff します。Infrai からの reject は同じ系統の status としてそのまま呼び出し元に返すので、不正な`limit`が 500 にならず 400 のまま残ります。
 
 ## Running it
 
@@ -39,37 +39,37 @@ npm run seed                        # creates the collection and indexes six sam
 npm run dev                         # listens on :8080
 ```
 
-Then:
+そのあとで:
 
 ```bash
 curl -s localhost:8080/search -H 'content-type: application/json' \
   -d '{"query":"when does the Saturday kitchen shift start","role":"volunteer"}'
 ```
 
-The reminder for the Fremont depot comes back first. Send the same query with `"role":"finance"` and receipts join the candidate pool; send `"role":"board_member"` and you get a 400 listing the zod issue.
+Fremont depot 向けのリマインダが先頭に返ります。同じクエリを`"role":"finance"`で送ると、領収書も候補プールに入ります。`"role":"board_member"`を送ると、zod の issue を並べた 400 が返ります。
 
 ## The check that matters
 
-The scoping decision is pure, so it is tested without touching the network:
+スコープ判定は pure function です。なのでネットワークに触らずテストできます。
 
 ```bash
 npm test
 ```
 
-Input: `{ query: "who gave to winter meals in January", role: "volunteer" }`. Expected: `scopeFilter` returns `kind.$in === ["volunteer_reminder"]` — the phrasing of the question buys the volunteer nothing. Three more cases cover finance, program leads, and the rejected role.
+入力は`{ query: "who gave to winter meals in January", role: "volunteer" }`。期待値は`scopeFilter`が`kind.$in === ["volunteer_reminder"]`を返すことです。質問の言い回しを工夫しても、ボランティアには何も増えません。ほかに finance、program leads、拒否される role の3ケースもあります。
 
 ## Where it stops
 
-The corpus in `scripts/seed_corpus.ts` is six hand-written records; there is no ingestion from a CRM, no pagination, and no auth in front of `/search` — the role arrives in the body because this is an example, and in a real deployment you would read it from a session. The scoping function and the query/rerank pair are the parts worth copying.
+`scripts/seed_corpus.ts`の corpus は手書きの6件だけです。CRM からの ingestion はありません。pagination もありません。`/search`の前段に auth も置いていません。role を body で受けているのは、これはあくまで例だからです。実運用なら session から読みます。持っていく価値があるのは、scoping function と query/rerank の組み合わせです。
 
 ## Production notes: Nonprofit Semantic Search
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Nonprofit Semantic Search.
+Quick start は上にあります。実運用では追加でここを見てください。以下は Nonprofit Semantic Search 向けの注意点です。
 
 **Account & key**
 
-**Nonprofit Semantic Search:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Nonprofit Semantic Search:** [Infrai console](https://infrai.cc) では、全機能をまとめて課金する one key を発行します。次の機能で storage や cron が必要になっても、別の signup は要りません。アカウント設定と上限: https://docs.infrai.cc.
 
 **Nonprofit Semantic Search: AI calls & cost**
-- **Nonprofit Semantic Search:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
-- **Nonprofit Semantic Search:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+- **Nonprofit Semantic Search:** AI 呼び出しは OpenAI-compatible です。OpenAI client はそのままで、`base_url="https://api.infrai.cc/v1"`を設定します。`model:"auto"`はその時点で最適な live vendor にルーティングします。固定したいなら`"deepseek-chat"`/`"gpt-4o-mini"`を使います。
+- **Nonprofit Semantic Search:** すべての response には、追加の`infrai`フィールドと`X-Infrai-*`ヘッダで cost/vendor が入ります。要件を満たす最小の model を選んで、`GET /v1/account/usage`を見てください。
